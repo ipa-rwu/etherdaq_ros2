@@ -132,7 +132,7 @@ namespace optoforce_etherdaq_driver
     }
 
 
-    EtherDAQDriver::EtherDAQDriver(const std::string &address, unsigned int uSpeed, unsigned int filter) :
+    EtherDAQDriver::EtherDAQDriver(const std::string &address, unsigned int uSpeed, unsigned int filter, double T_lowpass) :
     address_(address),
     socket_(io_service_),
     stop_recv_thread_(false),
@@ -148,7 +148,8 @@ namespace optoforce_etherdaq_driver
     speed_(uSpeed),
     filter_(filter),
     force_units_(0),
-    torque_units_(0)
+    torque_units_(0),
+    T_lowpass_(T_lowpass)
     {
         // Construct UDP socket
         udp::endpoint etherdaq_endpoint( boost::asio::ip::address_v4::from_string(address), DAQ_PORT);
@@ -303,13 +304,13 @@ namespace optoforce_etherdaq_driver
     void EtherDAQDriver::doZero()
     {
         boost::unique_lock<boost::mutex> lock(mutex_);
-        offset_data_.wrench.force.x += new_data_.wrench.force.x;
-        offset_data_.wrench.force.y += new_data_.wrench.force.y;
-        offset_data_.wrench.force.z += new_data_.wrench.force.z;
+        offset_data_.wrench.force.x = fx_lowpass_;
+        offset_data_.wrench.force.y = fy_lowpass_;
+        offset_data_.wrench.force.z = fz_lowpass_;
 
-        offset_data_.wrench.torque.x += new_data_.wrench.torque.x;
-        offset_data_.wrench.torque.y += new_data_.wrench.torque.y;
-        offset_data_.wrench.torque.z += new_data_.wrench.torque.z;
+        offset_data_.wrench.torque.x = tx_lowpass_;
+        offset_data_.wrench.torque.y = ty_lowpass_;
+        offset_data_.wrench.torque.z = tz_lowpass_;
     }
 
 
@@ -425,6 +426,16 @@ namespace optoforce_etherdaq_driver
                         tmp_data.wrench.torque.z = double(hsu_record.tz_) * torque_scale_;
                         {
                             boost::unique_lock<boost::mutex> lock(mutex_);
+
+                            // update lowpass measurement signal for tare
+                            const double Ts = 1.0/speed_;
+                            fx_lowpass_ = Ts/T_lowpass_ * (tmp_data.wrench.force.x + (T_lowpass_/Ts - 1) * fx_lowpass_);
+                            fy_lowpass_ = Ts/T_lowpass_ * (tmp_data.wrench.force.y + (T_lowpass_/Ts - 1) * fy_lowpass_);
+                            fz_lowpass_ = Ts/T_lowpass_ * (tmp_data.wrench.force.z + (T_lowpass_/Ts - 1) * fz_lowpass_);
+                            tx_lowpass_ = Ts/T_lowpass_ * (tmp_data.wrench.torque.x + (T_lowpass_/Ts - 1) * tx_lowpass_);
+                            ty_lowpass_ = Ts/T_lowpass_ * (tmp_data.wrench.torque.y + (T_lowpass_/Ts - 1) * ty_lowpass_);
+                            tz_lowpass_ = Ts/T_lowpass_ * (tmp_data.wrench.torque.z + (T_lowpass_/Ts - 1) * tz_lowpass_);
+
                             new_data_ = tmp_data;
                             new_data_.wrench.force.x -= offset_data_.wrench.force.x;
                             new_data_.wrench.force.y -= offset_data_.wrench.force.y;

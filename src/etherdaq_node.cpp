@@ -52,8 +52,20 @@ namespace po = boost::program_options;
 using namespace std;
 
 
+template <typename T>
+T param_or_throw(const ros::NodeHandle& nh, std::string key) {
+	T p;
+	if(!nh.getParam(key, p)) {
+		ROS_ERROR_STREAM("Parameter '" << key << "' not set.");
+		throw std::runtime_error(key);
+	}
+	return p;
+}
+
+
 
 optoforce_etherdaq_driver::EtherDAQDriver * etherdaq = NULL;
+double T_lowpass = 0.2; // lowpass filter for tare
 
 void zeroFunction(const std_msgs::Bool &msg)
 {
@@ -69,15 +81,27 @@ void zeroFunction(const std_msgs::Bool &msg)
 }
 
 
+bool tareCallback(std_srvs::Empty::Request& request, std_srvs::Empty::Response& response)
+{
+	if (etherdaq == NULL) {
+		return false;
+	}
+	ros::Duration(3*T_lowpass).sleep(); // wait for 3 lowpass time constants to filter out oscillations
+	etherdaq->doZero();
+	return true;
+}
+
+
 int main(int argc, char **argv)
 {
 	ros::init(argc, argv, "etherdaq_node");
-	ros::NodeHandle nh;
+	ros::NodeHandle nh("~");
 
 	float pub_rate_hz;
 	int filter_hz;
 	string address;
 	string frame_id;
+	bool tare_as_topic = true;
 
 	po::options_description desc("Options");
 	desc.add_options()
@@ -85,8 +109,8 @@ int main(int argc, char **argv)
 	("rate", po::value<float>(&pub_rate_hz)->default_value(100.0), "set publish rate and Ethernet DAQ speed (in hertz)")
 	("filter", po::value<int>(&filter_hz)->default_value(4), "set filtering (0 = No filter; 1 = 500 Hz; 2 = 150 Hz; 3 = 50 Hz; 4 = 15 Hz; 5 = 5 Hz; 6 = 1.5 Hz)")
 	("wrench", "publish older Wrench message type instead of WrenchStamped")
-	("address", po::value<string>(&address), "IP address of EthernetDAQ box")
-	("frame_id", po::value<string>(&frame_id)->default_value("base_link"), "Frame ID for Wrench data")
+	("address", po::value<string>(&address)->default_value(""), "IP address of EthernetDAQ box")
+	("frame_id", po::value<string>(&frame_id)->default_value(""), "Frame ID for Wrench data")
 	;
 
 	po::positional_options_description p;
@@ -96,16 +120,69 @@ int main(int argc, char **argv)
 	po::store(po::command_line_parser(argc, argv).options(desc).positional(p).run(), vm);
 	po::notify(vm);
 
+	// additions: try to read in parameters as ros parameters
+
+	try {
+		pub_rate_hz = param_or_throw<float>(nh, "rate");
+		bool tare_as_topic = false;
+	} catch (std::runtime_error& e) {
+	}
+
+	try {
+		filter_hz = param_or_throw<int>(nh, "filter");
+		bool tare_as_topic = false;
+	} catch (std::runtime_error& e) {
+	}
+
+	try {
+		address = param_or_throw<string>(nh, "address");
+		bool tare_as_topic = false;
+	} catch (std::runtime_error& e) {
+	}
+
+	try {
+		frame_id = param_or_throw<string>(nh, "frame_id");
+		bool tare_as_topic = false;
+	} catch (std::runtime_error& e) {
+	}
+
+	try {
+		T_lowpass = param_or_throw<double>(nh, "T_lowpass");
+		bool tare_as_topic = false;
+
+		if (T_lowpass < 0.0)
+		{
+			cout << desc << endl;
+			cerr << "Please set a positive low pass filter time constant" << endl;
+			exit(EXIT_FAILURE);
+		}
+	} catch (std::runtime_error& e) {
+	}
+
+	try {
+		tare_as_topic = param_or_throw<bool>(nh, "tare_as_topic");
+	} catch (std::runtime_error& e) {
+	}
+
+	// end additions
+
 	if (vm.count("help"))
 	{
 		cout << desc << endl;
 		exit(EXIT_SUCCESS);
 	}
 
-	if (!vm.count("address"))
+	if (address.empty())
 	{
 		cout << desc << endl;
 		cerr << "Please specify address of EthernetDAQ" << endl;
+		exit(EXIT_FAILURE);
+	}
+
+	if (frame_id.empty())
+	{
+		cout << desc << endl;
+		cerr << "Please specify the frame id of the wrench topic" << endl;
 		exit(EXIT_FAILURE);
 	}
 
@@ -122,7 +199,7 @@ int main(int argc, char **argv)
 		ROS_WARN("Publishing EthernetDAQ data as geometry_msgs::Wrench is deprecated");
 	}
 
-	etherdaq = new optoforce_etherdaq_driver::EtherDAQDriver(address, pub_rate_hz, filter_hz);
+	etherdaq = new optoforce_etherdaq_driver::EtherDAQDriver(address, pub_rate_hz, filter_hz, T_lowpass);
 
 	bool isRawData = etherdaq->isRawData();
 
@@ -132,7 +209,15 @@ int main(int argc, char **argv)
 	}
 
 	ros::Publisher pub;
-	ros::Subscriber sub = nh.subscribe("ethdaq_zero", 1000, zeroFunction);
+
+	ros::Subscriber sub;
+	ros::ServiceServer service;
+	if (tare_as_topic) {
+		sub = nh.subscribe("ethdaq_zero", 1000, zeroFunction);
+	} else {
+		service = nh.advertiseService("tare", tareCallback);
+	}
+
 	if (publish_wrench)
 	{
 		pub = nh.advertise<geometry_msgs::Wrench>(topicName, 100);

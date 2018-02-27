@@ -43,6 +43,7 @@
 #include "diagnostic_msgs/DiagnosticArray.h"
 #include "diagnostic_updater/DiagnosticStatusWrapper.h"
 #include "std_msgs/Bool.h"
+#include "std_srvs/Empty.h"
 #include <unistd.h>
 #include <iostream>
 #include <memory>
@@ -55,8 +56,8 @@ using namespace std;
 template <typename T>
 T param_or_throw(const ros::NodeHandle& nh, std::string key) {
 	T p;
-	if(!nh.getParam(key, p)) {
-		ROS_ERROR_STREAM("Parameter '" << key << "' not set.");
+	if(!ros::param::get(key, p)) {
+		ROS_WARN_STREAM("Parameter '" + key + "' not set.");
 		throw std::runtime_error(key);
 	}
 	return p;
@@ -95,7 +96,7 @@ bool tareCallback(std_srvs::Empty::Request& request, std_srvs::Empty::Response& 
 int main(int argc, char **argv)
 {
 	ros::init(argc, argv, "etherdaq_node");
-	ros::NodeHandle nh("~");
+	ros::NodeHandle nh;
 
 	float pub_rate_hz;
 	int filter_hz;
@@ -123,32 +124,32 @@ int main(int argc, char **argv)
 	// additions: try to read in parameters as ros parameters
 
 	try {
-		pub_rate_hz = param_or_throw<float>(nh, "rate");
-		bool tare_as_topic = false;
+		pub_rate_hz = param_or_throw<float>(nh, "~rate");
+		tare_as_topic = false;
 	} catch (std::runtime_error& e) {
 	}
 
 	try {
-		filter_hz = param_or_throw<int>(nh, "filter");
-		bool tare_as_topic = false;
+		filter_hz = param_or_throw<int>(nh, "~filter");
+		tare_as_topic = false;
 	} catch (std::runtime_error& e) {
 	}
 
 	try {
-		address = param_or_throw<string>(nh, "address");
-		bool tare_as_topic = false;
+		address = param_or_throw<string>(nh, "~address");
+		tare_as_topic = false;
 	} catch (std::runtime_error& e) {
 	}
 
 	try {
-		frame_id = param_or_throw<string>(nh, "frame_id");
-		bool tare_as_topic = false;
+		frame_id = param_or_throw<string>(nh, "~frame_id");
+		tare_as_topic = false;
 	} catch (std::runtime_error& e) {
 	}
 
 	try {
-		T_lowpass = param_or_throw<double>(nh, "T_lowpass");
-		bool tare_as_topic = false;
+		T_lowpass = param_or_throw<double>(nh, "~T_lowpass");
+		tare_as_topic = false;
 
 		if (T_lowpass < 0.0)
 		{
@@ -160,7 +161,7 @@ int main(int argc, char **argv)
 	}
 
 	try {
-		tare_as_topic = param_or_throw<bool>(nh, "tare_as_topic");
+		tare_as_topic = param_or_throw<bool>(nh, "~tare_as_topic");
 	} catch (std::runtime_error& e) {
 	}
 

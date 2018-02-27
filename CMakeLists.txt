@@ -17,7 +17,7 @@ find_package(TinyXML REQUIRED)
 catkin_package(
   INCLUDE_DIRS include
   LIBRARIES etherdaq_driver
-  CATKIN_DEPENDS diagnostic_msgs diagnostic_updater geometry_msgs roscpp 
+  CATKIN_DEPENDS diagnostic_msgs diagnostic_updater geometry_msgs roscpp
 )
 
 include_directories(
@@ -26,15 +26,24 @@ include_directories(
 
 ## Declare a cpp library
 add_library(etherdaq_driver src/etherdaq_driver.cpp)
-target_link_libraries(etherdaq_driver 
-  ${catkin_LIBRARIES} 
-  ${Boost_LIBRARIES} 
-  ${CURL_LIBRARIES} 
+set_target_properties(etherdaq_driver
+    PROPERTIES CXX_STANDARD 11
+    CXX_STANDARD_REQUIRED ON)
+target_link_libraries(etherdaq_driver
+  ${catkin_LIBRARIES}
+  ${Boost_LIBRARIES}
+  ${CURL_LIBRARIES}
   ${TinyXML_LIBRARIES})
 
 ## Declare a cpp executable
 add_executable(etherdaq_node src/etherdaq_node.cpp)
+set_target_properties(etherdaq_node
+    PROPERTIES CXX_STANDARD 11
+    CXX_STANDARD_REQUIRED ON)
 add_executable(etherdaq_subscriber src/etherdaq_subscriber.cpp)
+set_target_properties(etherdaq_subscriber
+    PROPERTIES CXX_STANDARD 11
+    CXX_STANDARD_REQUIRED ON)
 
 ## Specify libraries to link a library or executable target against
 target_link_libraries(etherdaq_node etherdaq_driver)

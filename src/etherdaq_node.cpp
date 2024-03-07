@@ -1,280 +1,101 @@
-/*********************************************************************
-* Software License Agreement (BSD License)
-*
-*  Copyright (c) 2016, OptoForce, Ltd.
-*  All rights reserved.
-*
-*  Redistribution and use in source and binary forms, with or without
-*  modification, are permitted provided that the following conditions
-*  are met:
-*
-*   * Redistributions of source code must retain the above copyright
-*     notice, this list of conditions and the following disclaimer.
-*   * Redistributions in binary form must reproduce the above
-*     copyright notice, this list of conditions and the following
-*     disclaimer in the documentation and/or other materials provided
-*     with the distribution.
-*   * Neither the name of the OptoForce nor the names of its
-*     contributors may be used to endorse or promote products derived
-*     from this software without specific prior written permission.
-*
-*  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-*  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-*  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
-*  FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
-*  COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
-*  INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
-*  BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-*  LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
-*  CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
-*  LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
-*  ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-*  POSSIBILITY OF SUCH DAMAGE.
-*********************************************************************/
+#include "etherdaq_driver/etherdaq_node.hpp"
 
-/**
-* Simple stand-alone ROS node that takes data from EtherDAQ sensor and
-* Publishes it ROS topic
-*/
+EtherDAQNode::EtherDAQNode() : Node("etherdaq_node") {
+  // Declare parameters
+  address_ = this->declare_parameter<std::string>("address", "192.168.1.1");
+  rate_ = this->declare_parameter<int>("rate", 1000);  // Hz
+  filter_ = this->declare_parameter<int>("filter", 4);
+  frame_id_ = this->declare_parameter<std::string>("frame_id", "etherdaq_link");
+  T_lowpass_ = this->declare_parameter<double>("T_lowpass", 0.2);
+  tare_as_topic_ = this->declare_parameter<bool>("tare_as_topic", true);
 
-#include "ros/ros.h"
-#include "etherdaq_driver/etherdaq_driver.h"
-#include "geometry_msgs/WrenchStamped.h"
-#include "diagnostic_msgs/DiagnosticArray.h"
-#include "diagnostic_updater/DiagnosticStatusWrapper.h"
-#include "std_msgs/Bool.h"
-#include "std_srvs/Empty.h"
-#include <unistd.h>
-#include <iostream>
-#include <memory>
-#include <boost/program_options.hpp>
+  // // Initialize EtherDAQ driver
+  // etherdaq_driver_ =
+  //     std::make_unique<optoforce_etherdaq_ros2_driver::EtherDAQDriver>(
+  //         shared_from_this(), address_, rate_, filter_, T_lowpass_);
 
-namespace po = boost::program_options;
-using namespace std;
+  // Initialize publisher
+  wrench_pub_ = this->create_publisher<geometry_msgs::msg::WrenchStamped>(
+      "etherdaq_data", 10);
 
+  diag_pub_ = this->create_publisher<diagnostic_msgs::msg::DiagnosticArray>(
+      "/diagnostics", 10);
 
-template <typename T>
-T param_or_throw(const ros::NodeHandle& nh, std::string key) {
-	T p;
-	if(!ros::param::get(key, p)) {
-		ROS_WARN_STREAM("Parameter '" + key + "' not set.");
-		throw std::runtime_error(key);
-	}
-	return p;
+  // Initialize subscriber if tare_as_topic is true
+  if (tare_as_topic_) {
+    zero_sub_ = this->create_subscription<std_msgs::msg::Bool>(
+        "etherdaq_zero", 10,
+        std::bind(&EtherDAQNode::zeroFunction, this, std::placeholders::_1));
+  }
+
+  // Initialize service for taring
+  tare_service_ = this->create_service<std_srvs::srv::Empty>(
+      "tare", std::bind(&EtherDAQNode::tareCallback, this,
+                        std::placeholders::_1, std::placeholders::_2));
+
+  // Timer for checking and publishing new data
+  data_timer_ = this->create_wall_timer(
+      1ms,  // Adjust according to your data rate needs
+      [this]() {
+        geometry_msgs::msg::WrenchStamped data;
+        if (etherdaq_driver_->waitForNewData()) {
+          etherdaq_driver_->getData(data);
+          // packetCount++;
+          data.header.frame_id =
+              frame_id_;  // Ensure frame_id is a member variable
+          wrench_pub_->publish(data);
+        }
+      });
+
+  // Timer for publishing diagnostics
+  diag_timer_ =
+      this->create_wall_timer(1ms, [this]() { this->publishDiagnostics(); });
 }
 
-
-
-optoforce_etherdaq_driver::EtherDAQDriver * etherdaq = NULL;
-double T_lowpass = 0.2; // lowpass filter for tare
-
-void zeroFunction(const std_msgs::Bool &msg)
-{
-	if (etherdaq == NULL) {
-		return;
-	}
-	bool zeroing = msg.data;
-	if (zeroing) {
-		etherdaq->doZero();
-		return;
-	}
-	etherdaq->doUnzero();
+void EtherDAQNode::zeroFunction(const std_msgs::msg::Bool::SharedPtr msg) {
+  if (msg->data) {
+    etherdaq_driver_->doZero();
+  } else {
+    etherdaq_driver_->doUnzero();
+  }
 }
 
-
-bool tareCallback(std_srvs::Empty::Request& request, std_srvs::Empty::Response& response)
-{
-	if (etherdaq == NULL) {
-		return false;
-	}
-	ros::Duration(3*T_lowpass).sleep(); // wait for 3 lowpass time constants to filter out oscillations
-	etherdaq->doZero();
-	return true;
+void EtherDAQNode::tareCallback(
+    const std_srvs::srv::Empty::Request::SharedPtr request,
+    std_srvs::srv::Empty::Response::SharedPtr response) {
+  etherdaq_driver_->doZero();
 }
 
+void EtherDAQNode::initializeEtherDAQDriver() {
+  // Ensure this method is called after the Node is fully constructed
+  etherdaq_driver_ =
+      std::make_unique<optoforce_etherdaq_ros2_driver::EtherDAQDriver>(
+          shared_from_this(), address_, rate_, filter_, T_lowpass_);
+  // Continue with the rest of the initialization
+}
 
-int main(int argc, char **argv)
-{
-	ros::init(argc, argv, "etherdaq_node");
-	ros::NodeHandle nh;
+void EtherDAQNode::publishDiagnostics() {
+  diagnostic_msgs::msg::DiagnosticArray diag_array;
 
-	float pub_rate_hz;
-	int filter_hz;
-	string address;
-	string frame_id;
-	bool tare_as_topic = true;
+  diagnostic_updater::DiagnosticStatusWrapper diag_status;
+  etherdaq_driver_->diagnostics(diag_status);
+  diag_array.status.push_back(diag_status);
 
-	po::options_description desc("Options");
-	desc.add_options()
-	("help", "display help")
-	("rate", po::value<float>(&pub_rate_hz)->default_value(100.0), "set publish rate and Ethernet DAQ speed (in hertz)")
-	("filter", po::value<int>(&filter_hz)->default_value(4), "set filtering (0 = No filter; 1 = 500 Hz; 2 = 150 Hz; 3 = 50 Hz; 4 = 15 Hz; 5 = 5 Hz; 6 = 1.5 Hz)")
-	("wrench", "publish older Wrench message type instead of WrenchStamped")
-	("address", po::value<string>(&address)->default_value(""), "IP address of EthernetDAQ box")
-	("frame_id", po::value<string>(&frame_id)->default_value(""), "Frame ID for Wrench data")
-	;
+  diag_array.header.stamp = this->now();
+  diag_pub_->publish(diag_array);
+}
 
-	po::positional_options_description p;
-	p.add("address",  1);
+int main(int argc, char** argv) {
+  rclcpp::init(argc, argv);
+  auto node = std::make_shared<EtherDAQNode>();
+  node->initializeEtherDAQDriver();
+  rclcpp::executors::MultiThreadedExecutor executor;
+  // Add your node to the executor
+  executor.add_node(node);
 
-	po::variables_map vm;
-	po::store(po::command_line_parser(argc, argv).options(desc).positional(p).run(), vm);
-	po::notify(vm);
+  // Spin the executor to process callbacks
+  executor.spin();
 
-	// additions: try to read in parameters as ros parameters
-
-	try {
-		pub_rate_hz = param_or_throw<float>(nh, "~rate");
-		tare_as_topic = false;
-	} catch (std::runtime_error& e) {
-	}
-
-	try {
-		filter_hz = param_or_throw<int>(nh, "~filter");
-		tare_as_topic = false;
-	} catch (std::runtime_error& e) {
-	}
-
-	try {
-		address = param_or_throw<string>(nh, "~address");
-		tare_as_topic = false;
-	} catch (std::runtime_error& e) {
-	}
-
-	try {
-		frame_id = param_or_throw<string>(nh, "~frame_id");
-		tare_as_topic = false;
-	} catch (std::runtime_error& e) {
-	}
-
-	try {
-		T_lowpass = param_or_throw<double>(nh, "~T_lowpass");
-		tare_as_topic = false;
-
-		if (T_lowpass < 0.0)
-		{
-			cout << desc << endl;
-			cerr << "Please set a positive low pass filter time constant" << endl;
-			exit(EXIT_FAILURE);
-		}
-	} catch (std::runtime_error& e) {
-	}
-
-	try {
-		tare_as_topic = param_or_throw<bool>(nh, "~tare_as_topic");
-	} catch (std::runtime_error& e) {
-	}
-
-	// end additions
-
-	if (vm.count("help"))
-	{
-		cout << desc << endl;
-		exit(EXIT_SUCCESS);
-	}
-
-	if (address.empty())
-	{
-		cout << desc << endl;
-		cerr << "Please specify address of EthernetDAQ" << endl;
-		exit(EXIT_FAILURE);
-	}
-
-	if (frame_id.empty())
-	{
-		cout << desc << endl;
-		cerr << "Please specify the frame id of the wrench topic" << endl;
-		exit(EXIT_FAILURE);
-	}
-
-	if (filter_hz < 0 || filter_hz > 6) {
-		cout << desc << endl;
-		cerr<<"Please specify a valid filtering value instead of "<<filter_hz<<endl;
-		exit(EXIT_FAILURE);
-	}
-
-	bool publish_wrench = false;
-	if (vm.count("wrench"))
-	{
-		publish_wrench = true;
-		ROS_WARN("Publishing EthernetDAQ data as geometry_msgs::Wrench is deprecated");
-	}
-
-	etherdaq = new optoforce_etherdaq_driver::EtherDAQDriver(address, pub_rate_hz, filter_hz, T_lowpass);
-
-	bool isRawData = etherdaq->isRawData();
-
-	std::string topicName = "ethdaq_data";
-	if (isRawData) {
-		topicName += "_raw";
-	}
-
-	ros::Publisher pub;
-
-	ros::Subscriber sub;
-	ros::ServiceServer service;
-	if (tare_as_topic) {
-		sub = nh.subscribe("ethdaq_zero", 1000, zeroFunction);
-	} else {
-		service = nh.advertiseService("tare", tareCallback);
-	}
-
-	if (publish_wrench)
-	{
-		pub = nh.advertise<geometry_msgs::Wrench>(topicName, 100);
-	}
-	else
-	{
-		pub = nh.advertise<geometry_msgs::WrenchStamped>(topicName, 100);
-	}
-	ros::Rate pub_rate(pub_rate_hz);
-	geometry_msgs::WrenchStamped data;
-
-	ros::Duration diag_pub_duration(1.0);
-	ros::Publisher diag_pub = nh.advertise<diagnostic_msgs::DiagnosticArray>("/diagnostics", 2);
-	diagnostic_msgs::DiagnosticArray diag_array;
-	diag_array.status.reserve(1);
-	diagnostic_updater::DiagnosticStatusWrapper diag_status;
-	ros::Time last_diag_pub_time(ros::Time::now());
-
-	unsigned int packetCount = 0;
-	ros::Time startTime(ros::Time::now());
-	while (ros::ok())
-	{
-		if (etherdaq->waitForNewData())
-		{
-			etherdaq->getData(data);
-			packetCount++;
-			if (publish_wrench)
-			{
-				data.header.frame_id = frame_id;
-				pub.publish(data.wrench);
-			}
-			else
-			{
-				data.header.frame_id = frame_id;
-				pub.publish(data);
-			}
-		}
-
-		ros::Time current_time(ros::Time::now());
-		if ( (current_time - last_diag_pub_time) > diag_pub_duration )
-		{
-			diag_array.status.clear();
-			etherdaq->diagnostics(diag_status);
-			diag_array.status.push_back(diag_status);
-			diag_array.header.stamp = ros::Time::now();
-			diag_pub.publish(diag_array);
-			last_diag_pub_time = current_time;
-		}
-
-		ros::spinOnce();
-		pub_rate.sleep();
-	}
-
-	if (etherdaq != NULL) {
-		delete etherdaq;
-	}
-
-	return 0;
+  rclcpp::shutdown();
+  return 0;
 }

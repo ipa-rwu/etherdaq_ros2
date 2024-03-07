@@ -35,32 +35,35 @@
 #ifndef ETHERDAQ_DRIVER
 #define ETHERDAQ_DRIVER
 
+#include <curl/curl.h>
+#include <tinyxml2.h>
+
 #include <boost/asio.hpp>
+#include <boost/lexical_cast.hpp>
+#include <boost/thread/condition.hpp>
 #include <boost/thread/mutex.hpp>
 #include <boost/thread/thread.hpp>
-#include <boost/thread/condition.hpp>
+#include <diagnostic_updater/diagnostic_updater.hpp>
+#include <rclcpp/rclcpp.hpp>
 #include <string>
 
-#include <curl/curl.h>
-#include <tinyxml.h>
-#include <boost/lexical_cast.hpp>
+#include "diagnostic_msgs/msg/diagnostic_status.hpp"
+#include "geometry_msgs/msg/wrench_stamped.hpp"
 
-#include "diagnostic_updater/DiagnosticStatusWrapper.h"
-#include "geometry_msgs/WrenchStamped.h"
+using namespace std::chrono_literals;
+namespace optoforce_etherdaq_ros2_driver {
 
-namespace optoforce_etherdaq_driver
-{
-
-class EtherDAQDriver
-{
-public:
+class EtherDAQDriver {
+ public:
   // Start receiving data from EtherDAQ device
-  EtherDAQDriver(const std::string &address, unsigned int uSpeed = 100, unsigned int filter = 4, double T_lowpass = 0.1);
+  EtherDAQDriver(rclcpp::Node::SharedPtr node, const std::string &address,
+                 unsigned int uSpeed = 100, unsigned int filter = 4,
+                 double T_lowpass = 0.1);
 
   ~EtherDAQDriver();
 
   //! Get newest data from EtherDAQ device
-  void getData(geometry_msgs::WrenchStamped &data);
+  void getData(geometry_msgs::msg::WrenchStamped &data);
 
   //! Add device diagnostics status wrapper
   void diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d);
@@ -73,13 +76,14 @@ public:
 
   void doZero();
   void doUnzero();
-protected:
+
+ protected:
   void recvThreadFunc(void);
 
   //! Asks EtherDAQ to start streaming data.
   void startStreaming(void);
 
-  enum {DAQ_PORT=49152};
+  enum { DAQ_PORT = 49152 };
   std::string address_;
 
   boost::asio::io_service io_service_;
@@ -94,7 +98,7 @@ protected:
   std::string recv_thread_error_msg_;
 
   //! Newest data received from netft device
-  geometry_msgs::WrenchStamped new_data_;
+  geometry_msgs::msg::WrenchStamped new_data_;
   //! Count number of received <good> packets
   unsigned packet_count_;
   //! Count of lost packets using RDT sequence number
@@ -116,7 +120,7 @@ protected:
   //! Packet count last time diagnostics thread published output
   unsigned diag_packet_count_;
   //! Last time diagnostics was published
-  ros::Time last_diag_pub_time_;
+  rclcpp::Time last_diag_pub_time_;
 
   //! to keep track of out-of-order or duplicate packet
   uint32_t last_hs_sequence_;
@@ -128,8 +132,7 @@ protected:
   // Units of torque
   uint32_t torque_units_;
 
-
-  geometry_msgs::WrenchStamped offset_data_;
+  geometry_msgs::msg::WrenchStamped offset_data_;
 
   // lowpass for taring without noise influence
   double fx_lowpass_ = 0.0;
@@ -141,10 +144,10 @@ protected:
 
   const double T_lowpass_ = 0.1;
 
+  rclcpp::Node::SharedPtr node_;
+  rclcpp::Clock::SharedPtr clock_;
 };
 
+}  // end namespace optoforce_etherdaq_ros2_driver
 
-} // end namespace optoforce_etherdaq_driver
-
-
-#endif // ETHERDAQ_DRIVER
+#endif  // ETHERDAQ_DRIVER

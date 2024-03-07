@@ -24,16 +24,16 @@ After successful compiling, you will have two executable files and one library f
 Usage - Demo
 ------------
 
-First, should check if the EtherDAQ is working by OptoForce Ethernet Discovery Tool. The tool will 
+First, should check if the EtherDAQ is working by OptoForce Ethernet Discovery Tool. The tool will
 show you the address of your EtherDAQ device(s) connected to your network.
 
-To be able to run the ROS demo, you have to modify the following file: 
+To be able to run the ROS demo, you have to modify the following file:
 opto_ws/src/opto_ros_driver/ethernet_daq_driver/launch/demo.launch
 Replace 192.168.100.12 in the following line args="--address 192.168.100.12 --rate 1000 --filter 4"
 to your EtherDAQ's address provided by the Ethernet Discovery Tool.
 
 To run the demo be sure that you are in the home/opto_ws directory!
-Type roslaunch optoforce_etherdaq_driver demo.launch
+Type roslaunch optoforce_etherdaq_ros2_driver demo.launch
 
 You should see something similar on your console:
 
@@ -63,21 +63,21 @@ Usage - Real world
 
 
 The ROS driver is a simple node providing Force/Torque informations on a ROS topic.
-After compiling you can find the node in the /opto_ws/devel/lib/optoforce_etherdaq_driver.
+After compiling you can find the node in the /opto_ws/devel/lib/optoforce_etherdaq_ros2_driver.
 
 
 
 Parameters of the node
 ----------------------
 * --help Shows the help screen and exits.
-* --rate (default: 100) (in Hz) The publish speed of the F/T informations. It also sets the EtherDAQ speed to the given value. 
+* --rate (default: 100) (in Hz) The publish speed of the F/T informations. It also sets the EtherDAQ speed to the given value.
 * --filter (default: 4) Set the filtering (Valid parameters: 0 = No filter; 1 = 500 Hz; 2 = 150 Hz; 3 = 50 Hz; 4 = 15 Hz; 5 = 5 Hz; 6 = 1.5 Hz)
 * --address The IP address of the EtherDAQ device.
 * --wrench  publish older Wrench message type instead of WrenchStamped
 * --frame_id arg (default: "base_link") Frame ID for Wrench data
 
 
-Example: 
+Example:
  "./etherdaq_node --address 192.168.100.12 --rate 500 --filter 3"
 * This will start the node with 500 Hz publish rate and with 50 Hz filter.
 
@@ -89,7 +89,7 @@ The node subscribes to /etdaq_zero where you can zero the force/torque readings 
 
 The node publishes to the following topics:
 *   /diagnostics where you can check the status of the EtherDAQ (speed, last F/T values, system status, address, etc)
-*   /etherdaq_data the topic where F/T values are published either in Wrench or in WrenchStamped format if the force and torque units are given 
+*   /etherdaq_data the topic where F/T values are published either in Wrench or in WrenchStamped format if the force and torque units are given
 *   /etherdaq_data_raw topic where F/T values are published either in Wrench or in WrenchStamped format if the force and torque units are not given
 
 
@@ -98,8 +98,8 @@ The list and short description of source files
 ----------------------------------------------
 
 * etherdaq_driver.cpp: 	   This is the module which implements the communication between EtherDAQ and ROS.
-* etherdaq_node.cpp: 	   This is the module which publish F/T values on ROS topics using etherdaq_driver.cpp 
+* etherdaq_node.cpp: 	   This is the module which publish F/T values on ROS topics using etherdaq_driver.cpp
                            services.
 * etherdaq_subscriber.cpp: An example node which subscribes to the topics of etherdaq_node and displays
-                           the actual F/T, speed and elapsed times between two packets. Also this node 
+                           the actual F/T, speed and elapsed times between two packets. Also this node
                            does a zero/unzero in every 10 seconds.

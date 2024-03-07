@@ -1,63 +1,103 @@
-cmake_minimum_required(VERSION 2.8.3)
-project(optoforce_etherdaq_driver)
+cmake_minimum_required(VERSION 3.8)
+project(optoforce_etherdaq_ros2_driver)
 
-find_package(catkin REQUIRED COMPONENTS
-  cmake_modules
+if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
+
+# Find dependencies
+find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(std_srvs REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(diagnostic_msgs REQUIRED)
+find_package(diagnostic_updater REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(Boost REQUIRED COMPONENTS system thread)
+find_package(CURL REQUIRED) # Ensure this is found, consider using a FindCURL.cmake if not automatically found
+find_package(tinyxml2_vendor REQUIRED)
+find_package(TinyXML2 REQUIRED)
+
+include_directories(
+  include
+  ${Boost_INCLUDE_DIRS}
+  ${CURL_INCLUDE_DIRS}
+  ${TinyXML2_INCLUDE_DIRS}
+)
+
+set(driver_dependencies
+  rclcpp
   diagnostic_msgs
   diagnostic_updater
   geometry_msgs
-  roscpp
+  tinyxml2_vendor
+  TinyXML2
+  std_srvs
+  std_msgs
 )
 
-find_package(Boost REQUIRED COMPONENTS system thread program_options)
-find_package(CURL REQUIRED)
-find_package(TinyXML REQUIRED)
+set(executable_driver_node etherdaq_node)
+set(executable_sub etherdaq_subscriber)
 
+set(library_driver ${executable_driver_node}_core)
 
-catkin_package(
-  INCLUDE_DIRS include
-  LIBRARIES etherdaq_driver
-  CATKIN_DEPENDS diagnostic_msgs diagnostic_updater geometry_msgs roscpp
+# Declare a C++ library
+add_library(${library_driver} SHARED
+  src/etherdaq_driver.cpp
+)
+ament_target_dependencies(${library_driver}
+  ${driver_dependencies}
 )
 
-include_directories(
- include ${catkin_INCLUDE_DIRS}
-)
-
-## Declare a cpp library
-add_library(etherdaq_driver src/etherdaq_driver.cpp)
-set_target_properties(etherdaq_driver
-    PROPERTIES CXX_STANDARD 11
-    CXX_STANDARD_REQUIRED ON)
-target_link_libraries(etherdaq_driver
-  ${catkin_LIBRARIES}
+target_link_libraries(${library_driver}
   ${Boost_LIBRARIES}
   ${CURL_LIBRARIES}
-  ${TinyXML_LIBRARIES})
+  tinyxml2::tinyxml2
+)
 
-## Declare a cpp executable
-add_executable(etherdaq_node src/etherdaq_node.cpp)
-set_target_properties(etherdaq_node
-    PROPERTIES CXX_STANDARD 11
-    CXX_STANDARD_REQUIRED ON)
-add_executable(etherdaq_subscriber src/etherdaq_subscriber.cpp)
-set_target_properties(etherdaq_subscriber
-    PROPERTIES CXX_STANDARD 11
-    CXX_STANDARD_REQUIRED ON)
+# Declare C++ executables
+add_executable(${executable_driver_node} src/etherdaq_node.cpp)
+ament_target_dependencies(${executable_driver_node}
+  ${driver_dependencies}
+)
+target_link_libraries(${executable_driver_node}
+  ${library_driver}
+)
 
-## Specify libraries to link a library or executable target against
-target_link_libraries(etherdaq_node etherdaq_driver)
-target_link_libraries(etherdaq_subscriber ${catkin_LIBRARIES})
+add_executable(${executable_sub} src/etherdaq_subscriber.cpp)
+ament_target_dependencies(${executable_sub}
+  rclcpp
+  geometry_msgs
+  std_msgs
+)
 
+# Install targets
+install(TARGETS
+  ${executable_driver_node}
+  ${executable_sub}
+  DESTINATION lib/${PROJECT_NAME}
+)
+install(DIRECTORY include/
+  DESTINATION include/
+)
 
+# Install launch files and other resources
+install(DIRECTORY
+  launch
+  DESTINATION share/${PROJECT_NAME}/
+)
 
-#############
-## Install ##
-#############
+install(TARGETS ${library_driver}
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin
+)
 
-## Mark executables and/or libraries for installation
- install(TARGETS etherdaq_driver etherdaq_node
-   ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
- )
+ament_export_include_directories(include)
+
+ament_export_libraries(${library_driver})
+
+# ament_export_targets(${PROJECT_NAME} HAS_LIBRARY_TARGET)
+ament_export_dependencies(rclcpp diagnostic_msgs diagnostic_updater geometry_msgs tinyxml2_vendor tinyxml2)
+
+ament_package()
